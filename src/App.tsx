@@ -1,10 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  startTransition,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import {
   DIFFS_TAG_NAME,
-  parsePatchFiles,
   type FileDiffMetadata,
 } from "@pierre/diffs";
 import type { GitStatusEntry } from "@pierre/trees";
@@ -32,11 +38,39 @@ type SelectedPullRequest = {
   number: number;
 };
 
-type PullRequestDetailQueryResult = {
-  patchResult: PromiseSettledResult<PrPatch>;
-  filesResult: PromiseSettledResult<string[]>;
-  reviewThreadsResult: PromiseSettledResult<ReviewThread[]>;
+type ParsedPatchState = {
+  fileDiffs: FileDiffMetadata[];
+  parseError: string;
+  isParsing: boolean;
 };
+
+type ParsePatchWorkerRequest = {
+  type: "parse-patch";
+  requestId: number;
+  patch: string;
+  cacheKeyPrefix: string;
+  contextSize: number;
+};
+
+type ParsePatchWorkerResponse =
+  | {
+      type: "parse-patch-success";
+      requestId: number;
+      fileDiffs: FileDiffMetadata[];
+    }
+  | {
+      type: "parse-patch-error";
+      requestId: number;
+      error: string;
+    };
+
+const AGGRESSIVE_PATCH_CONTEXT_SIZE = 3;
+
+function getErrorMessage(error: unknown): string {
+  if (!error) return "";
+  if (error instanceof Error) return error.message;
+  return String(error);
+}
 
 const initialReposQueryOptions = {
   queryKey: ["initial-repos"] as const,
@@ -78,9 +112,16 @@ function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [isAddingRepo, setIsAddingRepo] = useState(false);
+  const [parsedPatch, setParsedPatch] = useState<ParsedPatchState>({
+    fileDiffs: [],
+    parseError: "",
+    isParsing: false,
+  });
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
   );
+  const patchParserWorkerRef = useRef<Worker | null>(null);
+  const parseRequestIdRef = useRef(0);
 
   const updateSearch = useCallback((value: string) => {
     setSearchQuery(value);
@@ -89,6 +130,49 @@ function App() {
   }, []);
 
   useEffect(() => () => clearTimeout(debounceRef.current), []);
+
+  useEffect(() => {
+    const worker = new Worker(
+      new URL("./pierre-patch-parser-worker.ts", import.meta.url),
+      { type: "module" },
+    );
+
+    patchParserWorkerRef.current = worker;
+
+    const handleWorkerMessage = (
+      event: MessageEvent<ParsePatchWorkerResponse>,
+    ) => {
+      const message = event.data;
+      if (message.requestId !== parseRequestIdRef.current) {
+        return;
+      }
+
+      startTransition(() => {
+        if (message.type === "parse-patch-success") {
+          setParsedPatch({
+            fileDiffs: message.fileDiffs,
+            parseError: "",
+            isParsing: false,
+          });
+          return;
+        }
+
+        setParsedPatch({
+          fileDiffs: [],
+          parseError: message.error,
+          isParsing: false,
+        });
+      });
+    };
+
+    worker.addEventListener("message", handleWorkerMessage);
+
+    return () => {
+      worker.removeEventListener("message", handleWorkerMessage);
+      worker.terminate();
+      patchParserWorkerRef.current = null;
+    };
+  }, []);
 
   const { data: initialRepos = [], isPending: isInitialLoading } = useQuery(
     initialReposQueryOptions,
@@ -111,8 +195,8 @@ function App() {
     ? `${selectedPr.repo}#${selectedPr.number}`
     : null;
 
-  const selectedPullRequestQuery = useQuery<PullRequestDetailQueryResult>({
-    queryKey: ["pull-request-detail", selectedPr?.repo, selectedPr?.number],
+  const selectedPatchQuery = useQuery<PrPatch>({
+    queryKey: ["pull-request-patch", selectedPr?.repo, selectedPr?.number],
     enabled: selectedPr !== null,
     queryFn: async () => {
       const repo = selectedPr?.repo;
@@ -122,66 +206,67 @@ function App() {
         throw new Error("A pull request must be selected before loading details.");
       }
 
-      const [patchResult, filesResult, reviewThreadsResult] =
-        await Promise.allSettled([
-          invoke<PrPatch>("get_pull_request_patch", {
-            repo,
-            number,
-          }),
-          invoke<string[]>("list_pull_request_changed_files", {
-            repo,
-            number,
-          }),
-          invoke<ReviewThread[]>("get_pull_request_review_threads", {
-            repo,
-            number,
-          }),
-        ]);
-
-      return {
-        patchResult,
-        filesResult,
-        reviewThreadsResult,
-      };
+      return invoke<PrPatch>("get_pull_request_patch", {
+        repo,
+        number,
+      });
     },
   });
 
-  const selectedPatch =
-    selectedPullRequestQuery.data?.patchResult.status === "fulfilled"
-      ? selectedPullRequestQuery.data.patchResult.value
-      : null;
-  const changedFiles =
-    selectedPullRequestQuery.data?.filesResult.status === "fulfilled"
-      ? selectedPullRequestQuery.data.filesResult.value
-      : [];
-  const reviewThreads =
-    selectedPullRequestQuery.data?.reviewThreadsResult.status === "fulfilled"
-      ? selectedPullRequestQuery.data.reviewThreadsResult.value
-      : [];
-  const patchError =
-    selectedPullRequestQuery.data?.patchResult.status === "rejected"
-      ? selectedPullRequestQuery.data.patchResult.reason instanceof Error
-        ? selectedPullRequestQuery.data.patchResult.reason.message
-        : String(selectedPullRequestQuery.data.patchResult.reason)
-      : "";
-  const changedFilesError =
-    selectedPullRequestQuery.data?.filesResult.status === "rejected"
-      ? selectedPullRequestQuery.data.filesResult.reason instanceof Error
-        ? selectedPullRequestQuery.data.filesResult.reason.message
-        : String(selectedPullRequestQuery.data.filesResult.reason)
-      : "";
-  const reviewThreadsError =
-    selectedPullRequestQuery.data?.reviewThreadsResult.status === "rejected"
-      ? selectedPullRequestQuery.data.reviewThreadsResult.reason instanceof Error
-        ? selectedPullRequestQuery.data.reviewThreadsResult.reason.message
-        : String(selectedPullRequestQuery.data.reviewThreadsResult.reason)
-      : "";
+  const changedFilesQuery = useQuery<string[]>({
+    queryKey: ["pull-request-files", selectedPr?.repo, selectedPr?.number],
+    enabled: selectedPr !== null,
+    queryFn: async () => {
+      const repo = selectedPr?.repo;
+      const number = selectedPr?.number;
+
+      if (!repo || number === undefined) {
+        throw new Error("A pull request must be selected before loading details.");
+      }
+
+      return invoke<string[]>("list_pull_request_changed_files", {
+        repo,
+        number,
+      });
+    },
+  });
+
+  const reviewThreadsQuery = useQuery<ReviewThread[]>({
+    queryKey: ["pull-request-review-threads", selectedPr?.repo, selectedPr?.number],
+    enabled: selectedPr !== null,
+    queryFn: async () => {
+      const repo = selectedPr?.repo;
+      const number = selectedPr?.number;
+
+      if (!repo || number === undefined) {
+        throw new Error("A pull request must be selected before loading details.");
+      }
+
+      return invoke<ReviewThread[]>("get_pull_request_review_threads", {
+        repo,
+        number,
+      });
+    },
+  });
+
+  const selectedPatch = selectedPatchQuery.data ?? null;
+  const changedFiles = changedFilesQuery.data ?? [];
+  const reviewThreads = reviewThreadsQuery.data ?? [];
+  const patchError = getErrorMessage(selectedPatchQuery.error);
+  const changedFilesError = getErrorMessage(changedFilesQuery.error);
+  const reviewThreadsError = getErrorMessage(reviewThreadsQuery.error);
   const isPatchLoading =
-    selectedPullRequestQuery.isPending || selectedPullRequestQuery.isFetching;
+    selectedPr !== null &&
+    (selectedPatchQuery.isPending ||
+      (selectedPatchQuery.isFetching && !selectedPatchQuery.data));
   const isChangedFilesLoading =
-    selectedPullRequestQuery.isPending || selectedPullRequestQuery.isFetching;
+    selectedPr !== null &&
+    (changedFilesQuery.isPending ||
+      (changedFilesQuery.isFetching && !changedFilesQuery.data));
   const isReviewThreadsLoading =
-    selectedPullRequestQuery.isPending || selectedPullRequestQuery.isFetching;
+    selectedPr !== null &&
+    (reviewThreadsQuery.isPending ||
+      (reviewThreadsQuery.isFetching && !reviewThreadsQuery.data));
 
   const availableRepos =
     debouncedQuery.trim().length > 0 ? searchRepos : initialRepos;
@@ -199,26 +284,28 @@ function App() {
     [availableRepos, addedRepoKeys],
   );
 
-  const parsedPatch = useMemo(() => {
+  useEffect(() => {
+    parseRequestIdRef.current += 1;
+
     if (!selectedPatch?.patch) {
-      return { fileDiffs: [] as FileDiffMetadata[], parseError: "" };
+      setParsedPatch({ fileDiffs: [], parseError: "", isParsing: false });
+      return;
     }
 
-    try {
-      const fileDiffs = parsePatchFiles(selectedPatch.patch).flatMap(
-        (patch) => patch.files,
-      );
-      return { fileDiffs, parseError: "" };
-    } catch (error) {
-      return {
-        fileDiffs: [] as FileDiffMetadata[],
-        parseError:
-          error instanceof Error
-            ? error.message
-            : "Failed to parse the PR patch.",
-      };
-    }
+    setParsedPatch({ fileDiffs: [], parseError: "", isParsing: true });
+
+    patchParserWorkerRef.current?.postMessage({
+      type: "parse-patch",
+      requestId: parseRequestIdRef.current,
+      patch: selectedPatch.patch,
+      cacheKeyPrefix: `${selectedPatch.repo}-${selectedPatch.number}`,
+      // Be aggressive here: the review UI only needs enough surrounding lines
+      // to orient the reader before Pierre's expand/collapse affordances take over.
+      contextSize: AGGRESSIVE_PATCH_CONTEXT_SIZE,
+    } satisfies ParsePatchWorkerRequest);
   }, [selectedPatch]);
+
+  const isPatchPreparing = isPatchLoading || parsedPatch.isParsing;
 
   const fileStats = useMemo(() => {
     if (parsedPatch.fileDiffs.length === 0) return null;
@@ -237,7 +324,7 @@ function App() {
       });
     }
     return map;
-  }, [parsedPatch]);
+  }, [parsedPatch.fileDiffs]);
 
   const gitStatus = useMemo(() => {
     if (!fileStats) return undefined;
@@ -317,7 +404,7 @@ function App() {
           <PatchViewerMain
             selectedPrKey={selectedPrKey}
             selectedPatch={selectedPatch}
-            isPatchLoading={isPatchLoading}
+            isPatchLoading={isPatchPreparing}
             patchError={patchError}
             changedFiles={changedFiles}
             isChangedFilesLoading={isChangedFilesLoading}

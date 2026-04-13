@@ -39,8 +39,10 @@ struct GhPullRequest {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct GhActor {
     login: String,
+    avatar_url: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -56,6 +58,8 @@ struct ReviewComment {
     id: String,
     database_id: Option<i64>,
     author_login: String,
+    author_avatar_url: Option<String>,
+    author_association: Option<String>,
     body: String,
     created_at: String,
     updated_at: String,
@@ -138,6 +142,7 @@ struct GraphQlReviewComment {
     url: String,
     path: String,
     author: Option<GhActor>,
+    author_association: Option<String>,
     reply_to: Option<GraphQlReplyTo>,
 }
 
@@ -242,6 +247,16 @@ fn parse_repo(repo: &str) -> Result<(&str, &str), String> {
 fn run_gh_graphql(args: &[String]) -> Result<String, String> {
     let args_ref: Vec<&str> = args.iter().map(|arg| arg.as_str()).collect();
     run_gh(&args_ref)
+}
+
+async fn run_blocking_task<T, F>(task: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(task)
+        .await
+        .map_err(|error| format!("Blocking task failed: {error}"))?
 }
 
 #[tauri::command]
@@ -367,8 +382,7 @@ fn list_pull_requests(repo: String) -> Result<Vec<PullRequestSummary>, String> {
         .collect())
 }
 
-#[tauri::command]
-fn get_pull_request_patch(repo: String, number: u32) -> Result<PrPatch, String> {
+fn get_pull_request_patch_sync(repo: String, number: u32) -> Result<PrPatch, String> {
     let repo = repo.trim();
     let patch = run_gh(&[
         "pr",
@@ -376,7 +390,6 @@ fn get_pull_request_patch(repo: String, number: u32) -> Result<PrPatch, String> 
         &number.to_string(),
         "-R",
         repo,
-        "--patch",
         "--color",
         "never",
     ])?;
@@ -389,7 +402,12 @@ fn get_pull_request_patch(repo: String, number: u32) -> Result<PrPatch, String> 
 }
 
 #[tauri::command]
-fn list_pull_request_changed_files(repo: String, number: u32) -> Result<Vec<String>, String> {
+async fn get_pull_request_patch(repo: String, number: u32) -> Result<PrPatch, String> {
+    let repo = repo.trim().to_string();
+    run_blocking_task(move || get_pull_request_patch_sync(repo, number)).await
+}
+
+fn list_pull_request_changed_files_sync(repo: String, number: u32) -> Result<Vec<String>, String> {
     let repo = repo.trim();
     let stdout = run_gh(&[
         "pr",
@@ -417,7 +435,15 @@ fn list_pull_request_changed_files(repo: String, number: u32) -> Result<Vec<Stri
 }
 
 #[tauri::command]
-fn get_pull_request_review_threads(repo: String, number: u32) -> Result<Vec<ReviewThread>, String> {
+async fn list_pull_request_changed_files(repo: String, number: u32) -> Result<Vec<String>, String> {
+    let repo = repo.trim().to_string();
+    run_blocking_task(move || list_pull_request_changed_files_sync(repo, number)).await
+}
+
+fn get_pull_request_review_threads_sync(
+    repo: String,
+    number: u32,
+) -> Result<Vec<ReviewThread>, String> {
     let repo = repo.trim();
     let (owner, name) = parse_repo(repo)?;
     let query = r#"
@@ -438,8 +464,10 @@ query($owner: String!, $name: String!, $number: Int!) {
               updatedAt
               url
               path
+              authorAssociation
               author {
                 login
+                avatarUrl(size: 64)
               }
               replyTo {
                 id
@@ -505,12 +533,18 @@ query($owner: String!, $name: String!, $number: Int!) {
     let review_threads = review_thread_nodes
         .into_iter()
         .filter_map(|thread| {
-            let anchor_comment = thread
-                .comments
-                .nodes
+            let GraphQlReviewThread {
+                id,
+                is_resolved,
+                is_outdated,
+                comments,
+            } = thread;
+            let nodes = comments.nodes;
+
+            let anchor_comment = nodes
                 .iter()
                 .find(|comment| comment.reply_to.is_none())
-                .or_else(|| thread.comments.nodes.first())?;
+                .or_else(|| nodes.first())?;
 
             let anchor = anchor_comment
                 .database_id
@@ -524,30 +558,45 @@ query($owner: String!, $name: String!, $number: Int!) {
             let anchor_start_side = anchor.and_then(|comment| comment.start_side.clone());
             let anchor_subject_type = anchor.and_then(|comment| comment.subject_type.clone());
 
-            let comments = thread
-                .comments
-                .nodes
+            let comments = nodes
                 .into_iter()
-                .map(|comment| ReviewComment {
-                    id: comment.id,
-                    database_id: comment.database_id,
-                    author_login: comment
-                        .author
-                        .map(|author| author.login)
-                        .unwrap_or_else(|| "unknown".into()),
-                    body: comment.body,
-                    created_at: comment.created_at,
-                    updated_at: comment.updated_at,
-                    url: comment.url,
-                    reply_to_id: comment.reply_to.map(|reply_to| reply_to.id),
+                .map(|comment| {
+                    let GraphQlReviewComment {
+                        id,
+                        database_id,
+                        body,
+                        created_at,
+                        updated_at,
+                        url,
+                        path: _,
+                        author,
+                        author_association,
+                        reply_to,
+                    } = comment;
+
+                    ReviewComment {
+                        id,
+                        database_id,
+                        author_login: author
+                            .as_ref()
+                            .map(|author| author.login.clone())
+                            .unwrap_or_else(|| "unknown".into()),
+                        author_avatar_url: author.and_then(|author| author.avatar_url),
+                        author_association,
+                        body,
+                        created_at,
+                        updated_at,
+                        url,
+                        reply_to_id: reply_to.map(|reply_to| reply_to.id),
+                    }
                 })
                 .collect::<Vec<_>>();
 
             Some(ReviewThread {
-                id: thread.id,
+                id,
                 path: anchor_path,
-                is_resolved: thread.is_resolved,
-                is_outdated: thread.is_outdated,
+                is_resolved,
+                is_outdated,
                 line: anchor_line,
                 start_line: anchor_start_line,
                 side: anchor_side,
@@ -559,6 +608,15 @@ query($owner: String!, $name: String!, $number: Int!) {
         .collect();
 
     Ok(review_threads)
+}
+
+#[tauri::command]
+async fn get_pull_request_review_threads(
+    repo: String,
+    number: u32,
+) -> Result<Vec<ReviewThread>, String> {
+    let repo = repo.trim().to_string();
+    run_blocking_task(move || get_pull_request_review_threads_sync(repo, number)).await
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

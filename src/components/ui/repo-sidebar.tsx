@@ -1,13 +1,7 @@
 import { PlusIcon } from "@heroicons/react/20/solid";
 import { Accordion } from "./accordion";
 import { RepoSidebarItem, type PullRequestSummary } from "./repo-sidebar-item";
-
-type RepoSummary = {
-  name: string;
-  nameWithOwner: string;
-  description: string | null;
-  isPrivate: boolean | null;
-};
+import type { RepoSummary } from "../../types/github";
 
 type RepoSidebarProps = {
   repos: RepoSummary[];
@@ -32,7 +26,7 @@ function RepoSidebar({
 }: RepoSidebarProps) {
   return (
     <aside className="flex min-h-0 min-w-0 flex-col border-ink-300 bg-canvas md:border-b-0">
-      <div className="sticky top-0 z-10 flex w-full items-center gap-2.5 border-b border-ink-200 bg-canvas px-3 py-2.5 text-sm font-medium">
+      <div className="sticky top-0 z-10 flex w-full items-center gap-2.5  bg-canvas px-3 py-2.5 text-sm font-medium">
         Repositories
         <button
           aria-label="Add repo"

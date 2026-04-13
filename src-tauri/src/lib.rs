@@ -1109,6 +1109,8 @@ async fn get_pull_request_review_threads(
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_decorum::init())
         .invoke_handler(tauri::generate_handler![
             list_initial_repos,

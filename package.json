@@ -1,5 +1,5 @@
 {
-  "name": "tauri-diffs",
+  "name": "rudu",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -19,6 +19,8 @@
     "@tanstack/react-query": "^5.90.3",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-opener": "^2",
+    "@tauri-apps/plugin-process": "^2.3.1",
+    "@tauri-apps/plugin-updater": "^2.10.1",
     "fuse.js": "^7.3.0",
     "markdown-to-jsx": "^9.7.15",
     "react": "^19.1.0",

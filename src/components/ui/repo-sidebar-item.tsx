@@ -6,17 +6,7 @@ import {
   AccordionPanel,
 } from "./accordion";
 import { TruncateText } from "./truncate";
-
-type PullRequestSummary = {
-  number: number;
-  title: string;
-  state: string;
-  authorLogin: string;
-  updatedAt: string;
-  url: string;
-  headSha: string;
-  baseSha: string | null;
-};
+import type { PullRequestSummary } from "../../types/github";
 
 type RepoSidebarItemProps = {
   value: string;

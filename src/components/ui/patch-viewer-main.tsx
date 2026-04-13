@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import type {
   DiffLineAnnotation,
   FileDiffMetadata,
@@ -9,7 +10,7 @@ import type { GitStatusEntry } from "@pierre/trees";
 import { FileDiff, Virtualizer } from "@pierre/diffs/react";
 import { ChangedFilesTree } from "./changed-files-tree";
 import { ReviewThreadCard } from "./review-thread-card";
-import type { FileStatsEntry } from "../../App";
+import type { FileStatsEntry } from "../../types/github";
 import {
   getFileReviewThreadsForPath,
   normalizePath,
@@ -28,6 +29,13 @@ const VIRTUAL_FILE_METRICS: VirtualFileMetrics = {
   hunkSeparatorHeight: 32,
   fileGap: 16,
 };
+
+const DIFF_FONT_STYLE = {
+  "--diffs-font-family":
+    '"Geist Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+  "--diffs-header-font-family":
+    '"Geist Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+} as CSSProperties;
 
 type SelectedPatch = {
   repo: string;
@@ -196,8 +204,8 @@ function PatchViewerMain({
   }
 
   return (
-    <main className="h-full min-h-0 min-w-0 bg-canvas p-2 pl-0">
-      <section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border bg-surface">
+    <main className="h-full min-h-0 min-w-0  p-2 pl-0">
+      <section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-xl bg-surface">
         <div className="grid min-h-0 flex-1 min-w-0 grid-cols-[minmax(240px,1fr)_minmax(0,2fr)]">
           <div className="sticky top-0 h-full min-h-0 min-w-0 self-start">
             <ChangedFilesTree
@@ -279,6 +287,7 @@ function PatchViewerMain({
                             fileDiff={fileDiff}
                             metrics={VIRTUAL_FILE_METRICS}
                             lineAnnotations={fileReviewThreads.lineAnnotations}
+                            style={DIFF_FONT_STYLE}
                             options={{
                               theme: {
                                 dark: "pierre-dark",

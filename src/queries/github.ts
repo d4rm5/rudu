@@ -132,7 +132,6 @@ async function createPullRequestReviewComment(
   await invoke("create_pull_request_review_comment", {
     repo: input.repo,
     number: input.number,
-    headSha: input.headSha,
     body: input.body,
     path: input.path,
     line: input.line,
@@ -147,9 +146,7 @@ async function replyToPullRequestReviewComment(
   input: ReplyToPullRequestReviewCommentInput,
 ) {
   await invoke("reply_to_pull_request_review_comment", {
-    repo: input.repo,
-    number: input.number,
-    commentId: input.commentId,
+    threadId: input.threadId,
     body: input.body,
   });
 }
@@ -158,7 +155,6 @@ async function updatePullRequestReviewComment(
   input: UpdatePullRequestReviewCommentInput,
 ) {
   await invoke("update_pull_request_review_comment", {
-    repo: input.repo,
     commentId: input.commentId,
     body: input.body,
   });

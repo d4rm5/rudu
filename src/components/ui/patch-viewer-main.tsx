@@ -260,7 +260,6 @@ function PatchViewerMain({
       await createCommentMutation.mutateAsync({
         repo: selectedPatch.repo,
         number: selectedPatch.number,
-        headSha: selectedPatch.headSha,
         body,
         path: draftCommentTarget.path,
         line: draftCommentTarget.type === "line" ? draftCommentTarget.line : null,
@@ -282,30 +281,23 @@ function PatchViewerMain({
       return;
     }
 
-    const rootComment =
-      thread.comments.find((comment) => comment.replyToId === null) ??
-      thread.comments[0] ??
-      null;
-    if (rootComment?.databaseId == null) {
+    if (!thread.id) {
       throw new Error("This thread cannot be replied to from the app.");
     }
 
     await replyCommentMutation.mutateAsync({
-      repo: selectedPatch.repo,
-      number: selectedPatch.number,
-      commentId: rootComment.databaseId,
+      threadId: thread.id,
       body,
     });
   }
 
   async function handleEditComment(comment: ReviewComment, body: string) {
-    if (!selectedPatch || comment.databaseId == null) {
+    if (!selectedPatch || !comment.id) {
       throw new Error("This comment cannot be edited from the app.");
     }
 
     await updateCommentMutation.mutateAsync({
-      repo: selectedPatch.repo,
-      commentId: comment.databaseId,
+      commentId: comment.id,
       body,
     });
   }

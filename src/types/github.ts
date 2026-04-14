@@ -40,7 +40,6 @@ type ReviewCommentSide = "LEFT" | "RIGHT";
 type CreatePullRequestReviewCommentInput = {
   repo: string;
   number: number;
-  headSha: string;
   body: string;
   path: string;
   line: number | null;
@@ -51,15 +50,12 @@ type CreatePullRequestReviewCommentInput = {
 };
 
 type ReplyToPullRequestReviewCommentInput = {
-  repo: string;
-  number: number;
-  commentId: number;
+  threadId: string;
   body: string;
 };
 
 type UpdatePullRequestReviewCommentInput = {
-  repo: string;
-  commentId: number;
+  commentId: string;
   body: string;
 };
 

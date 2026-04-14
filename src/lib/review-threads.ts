@@ -11,6 +11,8 @@ type ReviewComment = {
   updatedAt: string;
   url: string;
   replyToId: string | null;
+  isPending?: boolean;
+  isOptimistic?: boolean;
 };
 
 type ReviewThread = {
@@ -24,6 +26,8 @@ type ReviewThread = {
   startSide: "LEFT" | "RIGHT" | null;
   subjectType: "line" | "file" | null;
   comments: ReviewComment[];
+  isPending?: boolean;
+  isOptimistic?: boolean;
 };
 
 type ReviewThreadAnnotation = {

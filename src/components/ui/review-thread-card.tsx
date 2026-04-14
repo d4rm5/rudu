@@ -135,7 +135,7 @@ function ReviewThreadCard({
           const canEdit =
             viewerLogin != null &&
             viewerLogin === comment.authorLogin &&
-            comment.databaseId !== null &&
+            comment.id.length > 0 &&
             onEditComment != null;
 
           return (
@@ -150,7 +150,7 @@ function ReviewThreadCard({
                     </span>
                   ) : null}
                   <span>{formatTimestamp(comment.createdAt)}</span>
-                  {!compact ? (
+                  {!compact && comment.url ? (
                     <a
                       className="text-ink-600 underline-offset-2 hover:text-ink-900 hover:underline"
                       href={comment.url}
@@ -196,7 +196,7 @@ function ReviewThreadCard({
         })}
       </div>
 
-      {rootComment?.databaseId !== null && onReplyToThread ? (
+      {rootComment && onReplyToThread ? (
         <div className="mt-3 border-t border-ink-200 pt-3">
           {activeAction?.type === "reply" ? (
             <ReviewCommentEditor

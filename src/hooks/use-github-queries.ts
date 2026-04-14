@@ -8,12 +8,14 @@ import {
 } from "react";
 import {
   skipToken,
+  useMutation,
   useQueries,
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
 import type { ReviewThread } from "../lib/review-threads";
 import {
+  createPullRequestReviewComment,
   githubKeys,
   initialReposQueryOptions,
   pullRequestCachedListQueryOptions,
@@ -21,14 +23,20 @@ import {
   pullRequestListQueryOptions,
   pullRequestPatchQueryOptions,
   pullRequestReviewThreadsQueryOptions,
+  replyToPullRequestReviewComment,
   savedReposQueryOptions,
   searchReposQueryOptions,
+  updatePullRequestReviewComment,
+  viewerLoginQueryOptions,
 } from "../queries/github";
 import type {
+  CreatePullRequestReviewCommentInput,
   PrPatch,
   PullRequestSummary,
+  ReplyToPullRequestReviewCommentInput,
   RepoSummary,
   SelectedPullRequest,
+  UpdatePullRequestReviewCommentInput,
 } from "../types/github";
 
 function getErrorMessage(error: unknown): string {
@@ -245,7 +253,48 @@ function useSelectedPullRequestData(selectedPr: SelectedPullRequest | null) {
   };
 }
 
+function usePullRequestReviewCommentMutations(
+  selectedPr: SelectedPullRequest | null,
+) {
+  const queryClient = useQueryClient();
+  const viewerLoginQuery = useQuery(viewerLoginQueryOptions());
+
+  const invalidateReviewThreads = useCallback(async () => {
+    if (!selectedPr) {
+      return;
+    }
+
+    await queryClient.invalidateQueries({
+      queryKey: githubKeys.pullRequestReviewThreads(selectedPr),
+    });
+  }, [queryClient, selectedPr]);
+
+  const createCommentMutation = useMutation({
+    mutationFn: (input: CreatePullRequestReviewCommentInput) =>
+      createPullRequestReviewComment(input),
+    onSuccess: invalidateReviewThreads,
+  });
+  const replyCommentMutation = useMutation({
+    mutationFn: (input: ReplyToPullRequestReviewCommentInput) =>
+      replyToPullRequestReviewComment(input),
+    onSuccess: invalidateReviewThreads,
+  });
+  const updateCommentMutation = useMutation({
+    mutationFn: (input: UpdatePullRequestReviewCommentInput) =>
+      updatePullRequestReviewComment(input),
+    onSuccess: invalidateReviewThreads,
+  });
+
+  return {
+    createCommentMutation,
+    replyCommentMutation,
+    updateCommentMutation,
+    viewerLogin: viewerLoginQuery.data?.login ?? null,
+  };
+}
+
 export {
+  usePullRequestReviewCommentMutations,
   useRepoPickerRepos,
   useRepoPullRequests,
   useSavedRepos,

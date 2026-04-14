@@ -260,6 +260,13 @@ fn run_gh_graphql(args: &[String]) -> Result<String, String> {
     run_gh(&args_ref)
 }
 
+fn get_viewer_login_sync() -> Result<String, String> {
+    ensure_user_context()?
+        .into_iter()
+        .next()
+        .ok_or_else(|| "Unable to determine GitHub viewer login".to_string())
+}
+
 async fn run_blocking_task<T, F>(task: F) -> Result<T, String>
 where
     T: Send + 'static,
@@ -926,6 +933,190 @@ async fn list_pull_request_changed_files(
     run_blocking_task(move || list_pull_request_changed_files_sync(repo, number, head_sha)).await
 }
 
+fn create_pull_request_review_comment_sync(
+    repo: String,
+    number: u32,
+    head_sha: String,
+    body: String,
+    path: String,
+    line: Option<u32>,
+    side: Option<String>,
+    start_line: Option<u32>,
+    start_side: Option<String>,
+    subject_type: Option<String>,
+) -> Result<(), String> {
+    let repo = repo.trim();
+    let head_sha = head_sha.trim();
+    let body = body.trim();
+    let path = path.trim();
+
+    if head_sha.is_empty() {
+        return Err("Head SHA is required for review comments".into());
+    }
+    if body.is_empty() {
+        return Err("Comment body is required".into());
+    }
+    if path.is_empty() {
+        return Err("File path is required".into());
+    }
+
+    let (owner, name) = parse_repo(repo)?;
+    let subject_type = subject_type.unwrap_or_else(|| "line".to_string());
+
+    if subject_type == "line" && line.is_none() {
+        return Err("Line comments require a target line".into());
+    }
+
+    let mut args = vec![
+        "api".to_string(),
+        "--method".to_string(),
+        "POST".to_string(),
+        format!("repos/{owner}/{name}/pulls/{number}/comments"),
+        "-f".to_string(),
+        format!("body={body}"),
+        "-f".to_string(),
+        format!("commit_id={head_sha}"),
+        "-f".to_string(),
+        format!("path={path}"),
+        "-f".to_string(),
+        format!("subject_type={subject_type}"),
+    ];
+
+    if let Some(line) = line {
+        args.push("-F".to_string());
+        args.push(format!("line={line}"));
+    }
+    if let Some(side) = side.filter(|side| !side.trim().is_empty()) {
+        args.push("-f".to_string());
+        args.push(format!("side={side}"));
+    }
+    if let Some(start_line) = start_line {
+        args.push("-F".to_string());
+        args.push(format!("start_line={start_line}"));
+    }
+    if let Some(start_side) = start_side.filter(|side| !side.trim().is_empty()) {
+        args.push("-f".to_string());
+        args.push(format!("start_side={start_side}"));
+    }
+
+    run_gh_graphql(&args)?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn create_pull_request_review_comment(
+    repo: String,
+    number: u32,
+    head_sha: String,
+    body: String,
+    path: String,
+    line: Option<u32>,
+    side: Option<String>,
+    start_line: Option<u32>,
+    start_side: Option<String>,
+    subject_type: Option<String>,
+) -> Result<(), String> {
+    let repo = repo.trim().to_string();
+    let head_sha = head_sha.trim().to_string();
+    let body = body.to_string();
+    let path = path.trim().to_string();
+    run_blocking_task(move || {
+        create_pull_request_review_comment_sync(
+            repo,
+            number,
+            head_sha,
+            body,
+            path,
+            line,
+            side,
+            start_line,
+            start_side,
+            subject_type,
+        )
+    })
+    .await
+}
+
+fn reply_to_pull_request_review_comment_sync(
+    repo: String,
+    number: u32,
+    comment_id: i64,
+    body: String,
+) -> Result<(), String> {
+    let repo = repo.trim();
+    let body = body.trim();
+    if body.is_empty() {
+        return Err("Reply body is required".into());
+    }
+
+    let (owner, name) = parse_repo(repo)?;
+    let args = vec![
+        "api".to_string(),
+        "--method".to_string(),
+        "POST".to_string(),
+        format!("repos/{owner}/{name}/pulls/{number}/comments/{comment_id}/replies"),
+        "-f".to_string(),
+        format!("body={body}"),
+    ];
+
+    run_gh_graphql(&args)?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn reply_to_pull_request_review_comment(
+    repo: String,
+    number: u32,
+    comment_id: i64,
+    body: String,
+) -> Result<(), String> {
+    let repo = repo.trim().to_string();
+    let body = body.to_string();
+    run_blocking_task(move || reply_to_pull_request_review_comment_sync(repo, number, comment_id, body))
+        .await
+}
+
+fn update_pull_request_review_comment_sync(
+    repo: String,
+    comment_id: i64,
+    body: String,
+) -> Result<(), String> {
+    let repo = repo.trim();
+    let body = body.trim();
+    if body.is_empty() {
+        return Err("Comment body is required".into());
+    }
+
+    let (owner, name) = parse_repo(repo)?;
+    let args = vec![
+        "api".to_string(),
+        "--method".to_string(),
+        "PATCH".to_string(),
+        format!("repos/{owner}/{name}/pulls/comments/{comment_id}"),
+        "-f".to_string(),
+        format!("body={body}"),
+    ];
+
+    run_gh_graphql(&args)?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn update_pull_request_review_comment(
+    repo: String,
+    comment_id: i64,
+    body: String,
+) -> Result<(), String> {
+    let repo = repo.trim().to_string();
+    let body = body.to_string();
+    run_blocking_task(move || update_pull_request_review_comment_sync(repo, comment_id, body)).await
+}
+
+#[tauri::command]
+async fn get_viewer_login() -> Result<String, String> {
+    run_blocking_task(get_viewer_login_sync).await
+}
+
 fn get_pull_request_review_threads_sync(
     repo: String,
     number: u32,
@@ -1122,7 +1313,11 @@ pub fn run() {
             list_pull_requests,
             get_pull_request_patch,
             list_pull_request_changed_files,
-            get_pull_request_review_threads
+            create_pull_request_review_comment,
+            reply_to_pull_request_review_comment,
+            update_pull_request_review_comment,
+            get_pull_request_review_threads,
+            get_viewer_login
         ])
         .setup(|app| {
             let cache_db_path = match app.path().resolve("cache.sqlite", BaseDirectory::AppData) {

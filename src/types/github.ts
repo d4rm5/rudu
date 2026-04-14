@@ -31,6 +31,38 @@ type PrPatch = {
   patch: string;
 };
 
+type ViewerLogin = {
+  login: string;
+};
+
+type ReviewCommentSide = "LEFT" | "RIGHT";
+
+type CreatePullRequestReviewCommentInput = {
+  repo: string;
+  number: number;
+  headSha: string;
+  body: string;
+  path: string;
+  line: number | null;
+  side: ReviewCommentSide | null;
+  startLine: number | null;
+  startSide: ReviewCommentSide | null;
+  subjectType: "file" | "line";
+};
+
+type ReplyToPullRequestReviewCommentInput = {
+  repo: string;
+  number: number;
+  commentId: number;
+  body: string;
+};
+
+type UpdatePullRequestReviewCommentInput = {
+  repo: string;
+  commentId: number;
+  body: string;
+};
+
 type FileStatsEntry = {
   additions: number;
   deletions: number;
@@ -38,9 +70,14 @@ type FileStatsEntry = {
 };
 
 export type {
+  CreatePullRequestReviewCommentInput,
   FileStatsEntry,
   PrPatch,
   PullRequestSummary,
+  ReplyToPullRequestReviewCommentInput,
   RepoSummary,
+  ReviewCommentSide,
   SelectedPullRequest,
+  UpdatePullRequestReviewCommentInput,
+  ViewerLogin,
 };

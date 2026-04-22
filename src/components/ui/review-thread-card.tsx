@@ -2,13 +2,17 @@ import { useState } from "react";
 import type { ReviewComment, ReviewThread } from "../../lib/review-threads";
 import { CommentMarkdown } from "./comment-markdown";
 import { ReviewCommentEditor } from "./review-comment-editor";
+import { TruncateText } from "./truncate";
 
 type ReviewThreadCardProps = {
   thread: ReviewThread;
   compact?: boolean;
+  slim?: boolean;
   viewerLogin?: string | null;
   onReplyToThread?: (thread: ReviewThread, body: string) => Promise<void>;
   onEditComment?: (comment: ReviewComment, body: string) => Promise<void>;
+  onClick?: () => void;
+  containerRef?: (node: HTMLDivElement | null) => void;
 };
 
 function formatTimestamp(value: string) {
@@ -61,9 +65,12 @@ function CommentAvatar({ comment }: { comment: ReviewComment }) {
 function ReviewThreadCard({
   thread,
   compact = false,
+  slim = false,
   viewerLogin = null,
   onReplyToThread,
   onEditComment,
+  onClick,
+  containerRef,
 }: ReviewThreadCardProps) {
   const [activeAction, setActiveAction] = useState<
     | { type: "reply" }
@@ -76,6 +83,50 @@ function ReviewThreadCard({
     thread.comments.find((comment) => comment.replyToId === null) ??
     thread.comments[0] ??
     null;
+
+  if (slim) {
+    const threadLine = thread.startLine ?? thread.line;
+    const locationLabel =
+      threadLine === null
+        ? `${thread.path} - File comment`
+        : `${thread.path}:${threadLine}`;
+    const summaryBody = (rootComment?.body ?? "")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    const content = (
+      <>
+        {rootComment ? (
+          <CommentAvatar comment={rootComment} />
+        ) : (
+          <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-ink-200 text-[11px] font-semibold text-ink-700">
+            ?
+          </div>
+        )}
+        <div className="min-w-0 flex-1">
+          <TruncateText className="min-w-0 text-sm text-ink-700">
+            {summaryBody || "(no comment body)"}
+          </TruncateText>
+          <p className="mt-1 text-xs text-ink-500">{locationLabel}</p>
+        </div>
+      </>
+    );
+
+    const baseClassName =
+      "flex w-full items-start gap-2 rounded-lg border border-ink-200 bg-canvas px-2.5 py-2 text-left [--comment-row-bg:#F2F1ED] [--truncate-marker-background-color:var(--comment-row-bg)]";
+
+    return onClick ? (
+      <button
+        className={`${baseClassName} transition hover:bg-canvasDark focus-visible:bg-surface hover:[--comment-row-bg:#F7F7F3] focus-visible:[--comment-row-bg:#F7F7F3]`}
+        onClick={onClick}
+        type="button"
+      >
+        {content}
+      </button>
+    ) : (
+      <div className={baseClassName}>{content}</div>
+    );
+  }
 
   async function handleReplySubmit(body: string) {
     if (!rootComment || !onReplyToThread) {
@@ -114,7 +165,10 @@ function ReviewThreadCard({
   }
 
   return (
-    <div className="rounded-lg border border-ink-200 bg-canvas/90 p-3 text-sm text-ink-800 shadow-sm">
+    <div
+      className="rounded-lg border border-ink-200 bg-canvas/90 p-3 text-sm text-ink-800 shadow-sm"
+      ref={containerRef}
+    >
       <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-ink-500">
         <span className="font-medium text-ink-900">
           {thread.isResolved ? "Resolved" : "Open thread"}

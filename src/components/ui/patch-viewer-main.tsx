@@ -16,6 +16,7 @@ import { ReviewThreadCard } from "./review-thread-card";
 import { usePullRequestReviewCommentMutations } from "../../hooks/use-github-queries";
 import {
   getFileReviewThreadsForPath,
+  isActiveReviewThread,
   normalizePath,
   type FileReviewThreads,
   type ReviewComment,
@@ -23,6 +24,9 @@ import {
   type ReviewThreadAnnotation,
 } from "../../lib/review-threads";
 import type { FileStatsEntry, ReviewCommentSide } from "../../types/github";
+import {
+  ChatBubbleLeftRightIcon,
+} from "@heroicons/react/20/solid";
 
 const VIRTUALIZER_CONFIG: Partial<VirtualizerConfig> = {
   overscrollSize: 1200,
@@ -104,35 +108,50 @@ function toSelectionSide(side: ReviewCommentSide | null | undefined) {
   return side === "LEFT" ? "deletions" : "additions";
 }
 
+function getSelectedLineLabel(target: DraftReviewCommentTarget | null) {
+  if (!target || target.type !== "line") {
+    return undefined;
+  }
+
+  const startLine = target.startLine ?? target.line;
+  const endLine = target.line;
+
+  if (startLine === endLine) {
+    return `Line ${endLine}`;
+  }
+
+  return `Lines ${startLine}-${endLine}`;
+}
+
 type ReviewThreadsPanelProps = {
   threads: ReviewThread[];
   isLoading: boolean;
   error: string;
   hasSelection: boolean;
-  viewerLogin: string | null;
-  onReplyToThread?: (thread: ReviewThread, body: string) => Promise<void>;
-  onEditComment?: (comment: ReviewComment, body: string) => Promise<void>;
 };
+
+function getThreadRefKey(thread: ReviewThread) {
+  if (thread.id) {
+    return `id:${thread.id}`;
+  }
+
+  return `fallback:${normalizePath(thread.path)}:${thread.startLine ?? thread.line ?? "file"}:${thread.comments[0]?.id ?? "unknown"}`;
+}
 
 function ReviewThreadsPanel({
   threads,
   isLoading,
   error,
   hasSelection,
-  viewerLogin,
-  onReplyToThread,
-  onEditComment,
 }: ReviewThreadsPanelProps) {
-  const activeThreads = threads.filter((t) => !t.isResolved && !t.isOutdated);
+  const activeThreads = threads.filter(isActiveReviewThread);
   const resolvedThreads = threads.filter((t) => t.isResolved || t.isOutdated);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="shrink-0 px-3 py-2 text-xs text-neutral-500">
-        <p className="text-sm text-neutral-800">
-          Comments{" "}
-          <span className="ml-2 text-neutral-500">{threads.length}</span>
-        </p>
+      <div className="shrink-0 px-3 py-3 text-xs text-neutral-500 flex items-center gap-2">
+        <ChatBubbleLeftRightIcon className="size-6 text-neutral-400" />
+        <p className="text-sm text-neutral-500 font-medium">Comments </p>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
@@ -160,6 +179,16 @@ function ReviewThreadsPanel({
           </div>
         ) : null}
 
+        {hasSelection &&
+        !isLoading &&
+        !error &&
+        threads.length > 0 &&
+        activeThreads.length === 0 ? (
+          <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+            No active comments. You&apos;re in the clear.
+          </div>
+        ) : null}
+
         {activeThreads.length > 0 ? (
           <div className="mb-3">
             <div className="sticky top-0 z-10 bg-surface px-1 py-1 text-xs font-semibold uppercase tracking-wide text-ink-500">
@@ -170,14 +199,7 @@ function ReviewThreadsPanel({
             </div>
             <div className="flex flex-col gap-2">
               {activeThreads.map((thread) => (
-                <ReviewThreadCard
-                  key={thread.id}
-                  compact
-                  thread={thread}
-                  viewerLogin={viewerLogin}
-                  onReplyToThread={onReplyToThread}
-                  onEditComment={onEditComment}
-                />
+                <ReviewThreadCard key={getThreadRefKey(thread)} slim thread={thread} />
               ))}
             </div>
           </div>
@@ -185,22 +207,13 @@ function ReviewThreadsPanel({
 
         {resolvedThreads.length > 0 ? (
           <div>
-            <div className="sticky top-0 z-10 bg-surface px-1 py-1 text-xs font-semibold uppercase tracking-wide text-ink-500">
-              Resolved / Outdated{" "}
-              <span className="font-normal text-ink-400">
-                {resolvedThreads.length}
-              </span>
+            <div className="sticky top-0 z-10 bg-surface px-1 py-1 text-xs font-medium  tracking-wide text-neutral-500">
+              Inactive
+              <span className="ml-2">{resolvedThreads.length}</span>
             </div>
             <div className="flex flex-col gap-2">
               {resolvedThreads.map((thread) => (
-                <ReviewThreadCard
-                  key={thread.id}
-                  compact
-                  thread={thread}
-                  viewerLogin={viewerLogin}
-                  onReplyToThread={onReplyToThread}
-                  onEditComment={onEditComment}
-                />
+                <ReviewThreadCard key={getThreadRefKey(thread)} slim thread={thread} />
               ))}
             </div>
           </div>
@@ -231,6 +244,7 @@ function PatchViewerMain({
     useState<DraftReviewCommentTarget | null>(null);
   const [draftCommentError, setDraftCommentError] = useState("");
   const pendingScrollPathRef = useRef<string | null>(null);
+  const stabilizingSelectedFilePathRef = useRef<string | null>(null);
   const fileDiffRefMap = useRef<Map<string, HTMLDivElement>>(new Map());
   const hasSelection = selectedPrKey !== null;
   const {
@@ -288,6 +302,11 @@ function PatchViewerMain({
 
   const handleSelectFile = useCallback(
     (path: string) => {
+      if (selectedFilePath === path) {
+        return;
+      }
+
+      stabilizingSelectedFilePathRef.current = path;
       setSelectedFilePath(path);
 
       if (scrollToDiffFile(path)) {
@@ -297,7 +316,7 @@ function PatchViewerMain({
 
       pendingScrollPathRef.current = path;
     },
-    [scrollToDiffFile],
+    [scrollToDiffFile, selectedFilePath],
   );
 
   useEffect(() => {
@@ -305,6 +324,7 @@ function PatchViewerMain({
     setDraftCommentTarget(null);
     setDraftCommentError("");
     pendingScrollPathRef.current = null;
+    stabilizingSelectedFilePathRef.current = null;
     fileDiffRefMap.current.clear();
   }, [selectedPrKey]);
 
@@ -330,6 +350,44 @@ function PatchViewerMain({
     scrollToDiffFile,
   ]);
 
+  useEffect(() => {
+    const targetPath = stabilizingSelectedFilePathRef.current;
+    if (
+      !targetPath ||
+      selectedFilePath == null ||
+      normalizePath(targetPath) !== normalizePath(selectedFilePath) ||
+      isPatchLoading ||
+      patchError ||
+      parsedPatch.parseError ||
+      isReviewThreadsLoading
+    ) {
+      return;
+    }
+
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const frameId = window.requestAnimationFrame(() => {
+      if (!scrollToDiffFile(selectedFilePath)) {
+        return;
+      }
+
+      stabilizingSelectedFilePathRef.current = null;
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [
+    isPatchLoading,
+    isReviewThreadsLoading,
+    patchError,
+    parsedPatch.fileDiffs,
+    parsedPatch.parseError,
+    reviewThreads,
+    scrollToDiffFile,
+    selectedFilePath,
+  ]);
+
   function openLineCommentDraft(path: string, range: SelectedLineRange) {
     const startSide = range.side ?? range.endSide;
     const endSide = range.endSide ?? range.side;
@@ -352,11 +410,6 @@ function PatchViewerMain({
       startLine: startLine !== endLine ? startLine : null,
       startSide: startLine !== endLine ? startGithubSide : null,
     });
-  }
-
-  function openFileCommentDraft(path: string) {
-    setDraftCommentError("");
-    setDraftCommentTarget({ type: "file", path });
   }
 
   async function handleSubmitDraftComment(body: string) {
@@ -459,13 +512,6 @@ function PatchViewerMain({
             {fileReviewThreads.fileThreads.length} file-level
           </span>
         ) : null}
-        <button
-          className="rounded-full bg-canvas px-2 py-0.5 text-ink-700 transition hover:bg-surface hover:text-ink-900"
-          onClick={() => openFileCommentDraft(path)}
-          type="button"
-        >
-          File comment
-        </button>
       </div>
     );
   }
@@ -478,6 +524,7 @@ function PatchViewerMain({
         <ReviewCommentEditor
           error={draftCommentError}
           isPending={createCommentMutation.isPending}
+          selectedLineLabel={getSelectedLineLabel(draftCommentTarget)}
           submitLabel="Comment"
           onCancel={() => {
             setDraftCommentError("");
@@ -631,6 +678,12 @@ function PatchViewerMain({
                                 diffIndicators: "bars",
                                 lineDiffType: "word",
                                 overflow: "scroll",
+                                unsafeCSS: `
+                                  [data-column-number][data-selected-line]::before {
+                                    background-color: #f59e0b;
+                                    background-image: none;
+                                  }
+                                `,
                                 enableGutterUtility:
                                   draftCommentTarget === null,
                                 onGutterUtilityClick: (range) =>
@@ -664,7 +717,7 @@ function PatchViewerMain({
                                 ) : null}
                                 {fileReviewThreads.fileThreads.map((thread) => (
                                   <ReviewThreadCard
-                                    key={thread.id}
+                                    key={getThreadRefKey(thread)}
                                     onEditComment={handleEditComment}
                                     onReplyToThread={handleReplyToThread}
                                     thread={thread}
@@ -705,9 +758,6 @@ function PatchViewerMain({
                   isLoading={isReviewThreadsLoading}
                   error={reviewThreadsError}
                   hasSelection={hasSelection}
-                  viewerLogin={viewerLogin}
-                  onReplyToThread={handleReplyToThread}
-                  onEditComment={handleEditComment}
                 />
               </div>
             </div>

@@ -21,6 +21,7 @@ type RepoSidebarItemProps = {
   nameWithOwner: string;
   pullRequests: PullRequestSummary[] | undefined;
   isLoading: boolean;
+  isRefreshing: boolean;
   error: string | undefined;
   onSelectPr: (repo: string, pr: PullRequestSummary) => void;
   onOpenChange: (open: boolean) => void;
@@ -97,11 +98,13 @@ function RepoSidebarItem({
   nameWithOwner,
   pullRequests,
   isLoading,
+  isRefreshing,
   error,
   onSelectPr,
   onOpenChange,
 }: RepoSidebarItemProps) {
   const ownerLogin = getOwnerLogin(nameWithOwner);
+  const hasPullRequests = Boolean(pullRequests && pullRequests.length > 0);
 
   return (
     <AccordionItem value={value} onOpenChange={onOpenChange}>
@@ -120,16 +123,19 @@ function RepoSidebarItem({
       <AccordionPanel>
         <div className="overflow-hidden">
           <div className="flex flex-col pl-2 pt-2">
-            {isLoading ? (
+            {isLoading && !hasPullRequests ? (
               <div className="text-sm text-ink-500">Loading PRs...</div>
             ) : null}
-            {error ? (
+            {isRefreshing && hasPullRequests ? (
+              <div className="text-sm text-ink-500">Refreshing PRs...</div>
+            ) : null}
+            {error && !hasPullRequests ? (
               <div className="text-sm text-danger-600">{error}</div>
             ) : null}
             {!isLoading && !error && pullRequests?.length === 0 ? (
               <div className="text-sm text-ink-500">No open PRs.</div>
             ) : null}
-            {!isLoading && !error && pullRequests
+            {pullRequests
               ? pullRequests.map((pullRequest) => {
                   const prKey = `${nameWithOwner}#${pullRequest.number}`;
                   const status = getPullRequestStatus(pullRequest);

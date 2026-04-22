@@ -11,7 +11,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import { DIFFS_TAG_NAME, type FileDiffMetadata } from "@pierre/diffs";
 import type { GitStatusEntry } from "@pierre/trees";
-import { AppUpdater } from "./components/ui/app-updater";
 import { RepoSidebar } from "./components/ui/repo-sidebar";
 import { AddRepoModal } from "./components/ui/add-repo-modal";
 import { PatchViewerMain } from "./components/ui/patch-viewer-main";
@@ -103,7 +102,7 @@ function App() {
   const { repos = [] } = useSavedRepos();
   const { availableRepos, availableReposError, isLoadingRepos } =
     useRepoPickerRepos(debouncedQuery);
-  const { loadingRepos, loadPullRequests, prsByRepo, repoErrors } =
+  const { loadingRepos, loadPullRequests, prsByRepo, repoErrors, refreshingRepos } =
     useRepoPullRequests({
       repos,
       setSelectedPr,
@@ -260,7 +259,7 @@ function App() {
   }
 
   async function handleRepoOpenChange(repo: string, open: boolean) {
-    if (open && !loadingRepos[repo]) {
+    if (open && !loadingRepos[repo] && !refreshingRepos[repo]) {
       await loadPullRequests(repo);
     }
   }
@@ -291,6 +290,7 @@ function App() {
             prsByRepo={prsByRepo}
             loadingRepos={loadingRepos}
             repoErrors={repoErrors}
+            refreshingRepos={refreshingRepos}
             defaultOpenValues={[]}
             onAddRepo={() => setIsPickerOpen(true)}
             onSelectPr={(name, pr) => void handleSelectPr(name, pr)}

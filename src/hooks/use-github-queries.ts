@@ -6,8 +6,8 @@ import {
   type Dispatch,
   type SetStateAction,
 } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import {
-  skipToken,
   type QueryKey,
   useMutation,
   useQueries,
@@ -20,10 +20,7 @@ import {
   githubKeys,
   initialReposQueryOptions,
   pullRequestCachedListQueryOptions,
-  pullRequestFilesQueryOptions,
   pullRequestListQueryOptions,
-  pullRequestPatchQueryOptions,
-  pullRequestReviewThreadsQueryOptions,
   replyToPullRequestReviewComment,
   savedReposQueryOptions,
   searchReposQueryOptions,
@@ -172,6 +169,7 @@ function useRepoPullRequests({
 }: UseRepoPullRequestsArgs) {
   const queryClient = useQueryClient();
   const [loadingRepos, setLoadingRepos] = useState<Record<string, boolean>>({});
+  const [refreshingRepos, setRefreshingRepos] = useState<Record<string, boolean>>({});
   const [repoErrors, setRepoErrors] = useState<Record<string, string>>({});
 
   const repoNames = useMemo(
@@ -186,45 +184,46 @@ function useRepoPullRequests({
     })),
   });
 
+  const cachedPullRequestQueries = useQueries({
+    queries: repoNames.map((repo) => ({
+      ...pullRequestCachedListQueryOptions(repo),
+      staleTime: Infinity,
+    })),
+  });
+
   const prsByRepo = useMemo(() => {
     const entries: Array<[string, PullRequestSummary[]]> = [];
     for (let i = 0; i < repoNames.length; i += 1) {
       const repo = repoNames[i];
-      const pullRequests = pullRequestQueries[i]?.data;
+      const pullRequests =
+        pullRequestQueries[i]?.data ?? cachedPullRequestQueries[i]?.data;
       if (!pullRequests) continue;
       entries.push([repo, pullRequests]);
     }
     return Object.fromEntries(entries);
-  }, [repoNames, pullRequestQueries]);
+  }, [cachedPullRequestQueries, repoNames, pullRequestQueries]);
 
   const loadPullRequests = useCallback(
     async (repo: string) => {
       const listOptions = pullRequestListQueryOptions(repo);
       const existingPullRequests =
         queryClient.getQueryData<PullRequestSummary[]>(listOptions.queryKey) ?? [];
-      let hasVisibleData = existingPullRequests.length > 0;
+      const cachedPullRequests =
+        queryClient.getQueryData<PullRequestSummary[]>(
+          pullRequestCachedListQueryOptions(repo).queryKey,
+        ) ?? [];
+      let hasVisibleData =
+        existingPullRequests.length > 0 || cachedPullRequests.length > 0;
 
-      setLoadingRepos((current) => ({ ...current, [repo]: true }));
+      setLoadingRepos((current) => ({
+        ...current,
+        [repo]: !hasVisibleData,
+      }));
+      setRefreshingRepos((current) => ({
+        ...current,
+        [repo]: hasVisibleData,
+      }));
       setRepoErrors((current) => ({ ...current, [repo]: "" }));
-
-      try {
-        const cachedPullRequests = await queryClient.fetchQuery(
-          pullRequestCachedListQueryOptions(repo),
-        );
-
-        if (cachedPullRequests.length > 0 || existingPullRequests.length === 0) {
-          queryClient.setQueryData(listOptions.queryKey, cachedPullRequests);
-        }
-
-        hasVisibleData = hasVisibleData || cachedPullRequests.length > 0;
-      } catch (error) {
-        if (!hasVisibleData) {
-          setRepoErrors((current) => ({
-            ...current,
-            [repo]: getErrorMessage(error),
-          }));
-        }
-      }
 
       try {
         const pullRequests = await queryClient.fetchQuery(listOptions);
@@ -258,6 +257,7 @@ function useRepoPullRequests({
         }
       } finally {
         setLoadingRepos((current) => ({ ...current, [repo]: false }));
+        setRefreshingRepos((current) => ({ ...current, [repo]: false }));
       }
     },
     [queryClient, setSelectedPr],
@@ -268,36 +268,63 @@ function useRepoPullRequests({
     loadPullRequests,
     prsByRepo,
     repoErrors,
+    refreshingRepos,
   };
 }
 
 function useSelectedPullRequestData(selectedPr: SelectedPullRequest | null) {
-  const selectedPatchQuery = useQuery(
-    selectedPr
-      ? pullRequestPatchQueryOptions(selectedPr)
-      : {
-          queryKey: githubKeys.pullRequestPatchIdle(),
-          queryFn: skipToken,
-        },
-  );
+  const selectedPatchQuery = useQuery({
+    queryKey: selectedPr
+      ? githubKeys.pullRequestPatch(selectedPr)
+      : githubKeys.pullRequestPatchIdle(),
+    queryFn: () => {
+      if (!selectedPr) {
+        throw new Error("No pull request selected");
+      }
 
-  const changedFilesQuery = useQuery(
-    selectedPr
-      ? pullRequestFilesQueryOptions(selectedPr)
-      : {
-          queryKey: githubKeys.pullRequestFilesIdle(),
-          queryFn: skipToken,
-        },
-  );
+      return invoke<PrPatch>("get_pull_request_patch", {
+        repo: selectedPr.repo,
+        number: selectedPr.number,
+        headSha: selectedPr.headSha,
+      });
+    },
+    enabled: selectedPr !== null,
+  });
 
-  const reviewThreadsQuery = useQuery(
-    selectedPr
-      ? pullRequestReviewThreadsQueryOptions(selectedPr)
-      : {
-          queryKey: githubKeys.pullRequestReviewThreadsIdle(),
-          queryFn: skipToken,
-        },
-  );
+  const changedFilesQuery = useQuery({
+    queryKey: selectedPr
+      ? githubKeys.pullRequestFiles(selectedPr)
+      : githubKeys.pullRequestFilesIdle(),
+    queryFn: () => {
+      if (!selectedPr) {
+        throw new Error("No pull request selected");
+      }
+
+      return invoke<string[]>("list_pull_request_changed_files", {
+        repo: selectedPr.repo,
+        number: selectedPr.number,
+        headSha: selectedPr.headSha,
+      });
+    },
+    enabled: selectedPr !== null,
+  });
+
+  const reviewThreadsQuery = useQuery({
+    queryKey: selectedPr
+      ? githubKeys.pullRequestReviewThreads(selectedPr)
+      : githubKeys.pullRequestReviewThreadsIdle(),
+    queryFn: () => {
+      if (!selectedPr) {
+        throw new Error("No pull request selected");
+      }
+
+      return invoke<ReviewThread[]>("get_pull_request_review_threads", {
+        repo: selectedPr.repo,
+        number: selectedPr.number,
+      });
+    },
+    enabled: selectedPr !== null,
+  });
 
   const selectedPatch = (selectedPatchQuery.data as PrPatch | undefined) ?? null;
   const changedFiles = (changedFilesQuery.data as string[] | undefined) ?? [];

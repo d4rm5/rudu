@@ -63,7 +63,7 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Build workflow artifacts
-        uses: tauri-apps/tauri-action@v1
+        uses: tauri-apps/tauri-action@v0.6.2
         with:
           tauriScript: bun tauri
           uploadWorkflowArtifacts: true

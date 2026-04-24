@@ -21,6 +21,13 @@ type DownloadProgress = {
   contentLength: number | null;
 };
 
+type AppUpdaterProps = {
+  buttonLabel?: string;
+  showFeedback?: boolean;
+  buttonClassName?: string;
+  containerClassName?: string;
+};
+
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) {
     return error.message;
@@ -45,7 +52,16 @@ function formatProgress(progress: DownloadProgress | null) {
   return `Downloaded ${percent}%`;
 }
 
-function AppUpdater() {
+function cx(...classes: Array<string | undefined | false>) {
+  return classes.filter(Boolean).join(" ");
+}
+
+function AppUpdater({
+  buttonLabel = "Check for updates",
+  showFeedback = true,
+  buttonClassName,
+  containerClassName,
+}: AppUpdaterProps) {
   const [currentVersion, setCurrentVersion] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string>("");
   const [isChecking, setIsChecking] = useState(false);
@@ -132,9 +148,17 @@ function AppUpdater() {
 
   return (
     <>
-      <div className="flex min-w-0 shrink-0 flex-col items-end gap-1">
+      <div
+        className={cx(
+          "flex min-w-0 shrink-0 flex-col items-end gap-1",
+          containerClassName,
+        )}
+      >
         <button
-          className="flex items-center gap-1 rounded-full border border-ink-300 bg-white px-3 py-1 pl-1 text-xs font-medium transition hover:bg-canvas dark:bg-surface dark:hover:bg-canvasDark"
+          className={cx(
+            "flex items-center gap-1 rounded-full border border-ink-300 bg-white px-3 py-1 pl-1 text-xs font-medium transition hover:bg-canvas dark:bg-surface dark:hover:bg-canvasDark",
+            buttonClassName,
+          )}
           disabled={isChecking || isInstalling}
           onClick={() => void handleCheckForUpdates()}
           type="button"
@@ -144,9 +168,9 @@ function AppUpdater() {
             ? "Checking..."
             : isInstalling
               ? "Installing..."
-              : "Check for updates"}
+              : buttonLabel}
         </button>
-        {feedback ? (
+        {showFeedback && feedback ? (
           <p className="max-w-72 text-right text-xs text-ink-600">{feedback}</p>
         ) : null}
       </div>

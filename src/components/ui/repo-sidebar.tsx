@@ -1,6 +1,7 @@
 import { MoonIcon, PlusIcon, SunIcon } from "@heroicons/react/20/solid";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Accordion } from "./accordion";
+import { AppUpdater } from "./app-updater";
 import { RepoSidebarItem, type PullRequestSummary } from "./repo-sidebar-item";
 import type { RepoSummary } from "../../types/github";
 
@@ -52,14 +53,22 @@ function RepoSidebar({
       />
       <div className="sticky top-0 z-10 flex w-full items-center gap-2.5 border-b border-ink-300 bg-canvas px-3 py-2.5 text-sm font-medium">
         Repositories
-        <button
-          aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
-          className="ml-auto inline-flex items-center justify-center p-1 text-ink-500 transition hover:bg-canvasDark hover:text-ink-700"
-          onClick={onToggleTheme}
-          type="button"
-        >
-          {isDark ? <SunIcon className="size-5 shrink-0" /> : <MoonIcon className="size-5 shrink-0" />}
-        </button>
+        <div className="ml-auto flex items-center gap-1.5">
+          <AppUpdater
+            buttonClassName="rounded-md border-0 bg-transparent px-2 py-1 text-xs font-medium hover:bg-canvasDark dark:bg-transparent dark:hover:bg-canvasDark"
+            buttonLabel="Update now"
+            containerClassName="flex-row items-center gap-0"
+            showFeedback={false}
+          />
+          <button
+            aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+            className="inline-flex items-center justify-center rounded p-1 text-ink-500 transition hover:bg-canvasDark hover:text-ink-700"
+            onClick={onToggleTheme}
+            type="button"
+          >
+            {isDark ? <SunIcon className="size-5 shrink-0" /> : <MoonIcon className="size-5 shrink-0" />}
+          </button>
+        </div>
         <button
           aria-label="Add repo"
           className="inline-flex items-center justify-center p-1 text-ink-500 transition hover:bg-canvasDark hover:text-ink-700"

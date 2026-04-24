@@ -1,5 +1,6 @@
 import * as React from "react";
-import { PlusIcon, XMarkIcon } from "@heroicons/react/20/solid";
+import { PlusIcon } from "@heroicons/react/20/solid";
+import { ArchiveBoxXMarkIcon } from "@heroicons/react/24/outline";
 import {
   AccordionItem,
   AccordionHeader,
@@ -41,7 +42,8 @@ function getPullRequestStatus(
     return {
       status: PullRequestBadgeStatus.Merged,
       label: "Merged",
-      className: "border-[#BFE1CC] bg-[#EAF6EF] text-[#1C6B3A] dark:border-green-900/30 dark:bg-green-950/40 dark:text-green-300",
+      className:
+        "border-[#BFE1CC] bg-[#EAF6EF] text-[#1C6B3A] dark:border-green-900/30 dark:bg-green-950/40 dark:text-green-300",
     };
   }
 
@@ -68,7 +70,8 @@ function getPullRequestStatus(
     return {
       status: PullRequestBadgeStatus.Conflicting,
       label: "Conflicting",
-      className: "border-[#F1C9C9] bg-[#FBEAEA] text-danger-600 dark:border-red-900/30 dark:bg-red-950/40 dark:text-red-300",
+      className:
+        "border-[#F1C9C9] bg-[#FBEAEA] text-danger-600 dark:border-red-900/30 dark:bg-red-950/40 dark:text-red-300",
     };
   }
 
@@ -76,7 +79,8 @@ function getPullRequestStatus(
     return {
       status: PullRequestBadgeStatus.CanMerge,
       label: "Can Merge",
-      className: "border-[#BFE1CC] bg-[#EAF6EF] text-[#1C6B3A] dark:border-green-900/30 dark:bg-green-950/40 dark:text-green-300",
+      className:
+        "border-[#BFE1CC] bg-[#EAF6EF] text-[#1C6B3A] dark:border-green-900/30 dark:bg-green-950/40 dark:text-green-300",
     };
   }
 
@@ -96,9 +100,13 @@ function PullRequestStatusIcon({ status }: { status: PullRequestBadgeStatus }) {
     case PullRequestBadgeStatus.Draft:
       return <LucideGitBranch className="text-ink-500" />;
     case PullRequestBadgeStatus.Conflicting:
-      return <LucideGitPullRequestClosed className="text-yellow-500 dark:text-yellow-300" />;
+      return (
+        <LucideGitPullRequestClosed className="text-yellow-500 dark:text-yellow-300" />
+      );
     case PullRequestBadgeStatus.CanMerge:
-      return <LucideGitPullRequestArrow className="text-green-600 dark:text-green-300" />;
+      return (
+        <LucideGitPullRequestArrow className="text-green-600 dark:text-green-300" />
+      );
     case PullRequestBadgeStatus.Open:
       return <LucideGitMerge className="text-green-500 dark:text-green-300" />;
     default:
@@ -135,16 +143,16 @@ function RepoSidebarItem({
           <div className="relative size-5 shrink-0">
             <img
               alt={`${ownerLogin} avatar`}
-              className="absolute inset-0 size-5 border border-ink-300 object-cover transition-opacity duration-200 group-hover:opacity-0"
+              className="absolute inset-0 size-5 rounded-full object-cover transition-opacity duration-200 group-hover:opacity-0"
               loading="lazy"
               src={getOwnerAvatarUrl(nameWithOwner)}
             />
-            <ChevronIcon className="absolute left-1/2 top-1/2 size-3.5 -translate-x-1/2 -translate-y-1/2 opacity-0 transition-[transform,opacity] duration-200 group-hover:opacity-100 group-data-[panel-open]:rotate-90 group-data-[panel-open]:opacity-100" />
+            <ChevronIcon className="absolute left-1/2 top-1/2 size-3.5 -translate-x-1/2 -translate-y-1/2 opacity-0 transition-[transform,opacity] duration-200 group-hover:opacity-100 group-data-[panel-open]:rotate-90" />
           </div>
           <span className="min-w-0 flex-1 truncate">{nameWithOwner}</span>
           <button
             aria-label={`Add PR to ${nameWithOwner}`}
-            className="inline-flex items-center justify-center rounded p-1 text-ink-500 transition hover:bg-canvasDark hover:text-ink-700"
+            className="inline-flex items-center justify-center rounded p-1 text-ink-500 opacity-0 transition-[opacity,color,background-color] duration-200 group-hover:opacity-100 hover:bg-canvasDark hover:text-ink-700"
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
@@ -186,8 +194,8 @@ function RepoSidebarItem({
                     <div className="group relative" key={prKey}>
                       <button
                         className={[
-                        "group relative flex w-full flex-col gap-1 bg-canvas px-3 py-2.5 text-left transition hover:bg-canvasDark focus-visible:bg-surface",
-                        isSelected ? "bg-canvasDark" : "",
+                          "group relative flex w-full flex-col gap-1 bg-canvas px-3 py-2.5 text-left transition hover:bg-canvasDark focus-visible:bg-surface",
+                          isSelected ? "bg-canvasDark" : "",
                         ].join(" ")}
                         onClick={() => onSelectPr(nameWithOwner, pullRequest)}
                         type="button"
@@ -202,16 +210,8 @@ function RepoSidebarItem({
                             <p className="min-w-0 flex-1 truncate text-sm text-ink-700">
                               {pullRequest.title}
                             </p>
-                            <span
-                              className={[
-                                "shrink-0 rounded border px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide",
-                                status.className,
-                              ].join(" ")}
-                            >
-                              {status.label}
-                            </span>
                           </div>
-                          <p className="shrink-0 whitespace-nowrap text-xs font-mono font-semibold">
+                          <p className="shrink-0 whitespace-nowrap text-xs font-mono font-semibold transition-opacity group-hover:opacity-0 group-focus-within:opacity-0">
                             <span className="text-green-600 dark:text-green-300">
                               +{pullRequest.additions}
                             </span>{" "}
@@ -223,11 +223,11 @@ function RepoSidebarItem({
                       </button>
                       <button
                         aria-label={`Remove PR #${pullRequest.number}`}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded border border-ink-300 bg-surface p-1 text-ink-500 opacity-0 shadow-sm transition hover:bg-canvas hover:text-ink-700 group-hover:opacity-100"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-ink-500 opacity-0 transition hover:bg-surface hover:text-ink-700 group-hover:opacity-100"
                         onClick={() => onRemovePr(nameWithOwner, pullRequest)}
                         type="button"
                       >
-                        <XMarkIcon className="size-4 shrink-0" />
+                        <ArchiveBoxXMarkIcon className="size-4 shrink-0" />
                       </button>
                     </div>
                   );

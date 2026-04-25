@@ -9,12 +9,17 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { useWorkerPool } from "@pierre/diffs/react";
-import { DIFFS_TAG_NAME, type FileDiffMetadata } from "@pierre/diffs";
+import {
+  parsePatchFiles,
+  trimPatchContext,
+  type FileDiffMetadata,
+} from "@pierre/diffs";
 import type { GitStatusEntry } from "@pierre/trees";
 import { RepoSidebar } from "./components/ui/repo-sidebar";
 import { TrackPullRequestModal } from "./components/ui/track-pull-request-modal";
 import { PatchViewerMain } from "./components/ui/patch-viewer-main";
 import { GhCliGateScreen } from "./components/ui/gh-cli-gate-screen";
+import PatchParserWorker from "./pierre-patch-parser-worker.ts?worker";
 import {
   getErrorMessage,
   useRepoPickerRepos,
@@ -65,25 +70,23 @@ type ParsePatchWorkerResponse =
       error: string;
     };
 
+function parsePatchLocally(
+  patch: string,
+  cacheKeyPrefix: string,
+  contextSize: number,
+): FileDiffMetadata[] {
+  const trimmedPatch = trimPatchContext(patch, contextSize);
+  return parsePatchFiles(trimmedPatch, cacheKeyPrefix).flatMap(
+    (parsedPatch) => parsedPatch.files,
+  );
+}
+
 const AGGRESSIVE_PATCH_CONTEXT_SIZE = 3;
 // Manual simulation override for GH CLI preflight.
 // Set to one of: "ready", "missing_cli", "not_authenticated", "unknown_error".
 const GH_CLI_STATUS_OVERRIDE: GhCliStatusKind | null = null;
 type PullRequestPickerMode = "repo-then-pr" | "pr-only";
 type PullRequestPickerStep = "repo" | "pull-request";
-
-if (typeof HTMLElement !== "undefined" && !customElements.get(DIFFS_TAG_NAME)) {
-  class DiffsContainerElement extends HTMLElement {
-    constructor() {
-      super();
-      if (!this.shadowRoot) {
-        this.attachShadow({ mode: "open" });
-      }
-    }
-  }
-
-  customElements.define(DIFFS_TAG_NAME, DiffsContainerElement);
-}
 
 function MainApp() {
   const queryClient = useQueryClient();
@@ -114,6 +117,7 @@ function MainApp() {
   );
   const patchParserWorkerRef = useRef<Worker | null>(null);
   const parseRequestIdRef = useRef(0);
+  const pendingParseRequestRef = useRef<ParsePatchWorkerRequest | null>(null);
   const refreshedReposRef = useRef<Set<string>>(new Set());
   const previousRepoNamesRef = useRef<string[]>([]);
 
@@ -135,10 +139,15 @@ function MainApp() {
     });
 
   useEffect(() => {
-    const worker = new Worker(
-      new URL("./pierre-patch-parser-worker.ts", import.meta.url),
-      { type: "module" },
-    );
+    let worker: Worker | null = null;
+
+    try {
+      worker = new PatchParserWorker();
+    } catch (error) {
+      console.error("Failed to initialize patch parser worker.", error);
+      patchParserWorkerRef.current = null;
+      return undefined;
+    }
 
     patchParserWorkerRef.current = worker;
 
@@ -168,10 +177,48 @@ function MainApp() {
       });
     };
 
+    const handleWorkerError = (event: ErrorEvent) => {
+      console.error("Patch parser worker failed.", event.error ?? event.message);
+
+      const pendingRequest = pendingParseRequestRef.current;
+      if (!pendingRequest || pendingRequest.requestId !== parseRequestIdRef.current) {
+        return;
+      }
+
+      try {
+        const fileDiffs = parsePatchLocally(
+          pendingRequest.patch,
+          pendingRequest.cacheKeyPrefix,
+          pendingRequest.contextSize,
+        );
+
+        startTransition(() => {
+          setParsedPatch({
+            fileDiffs,
+            parseError: "",
+            isParsing: false,
+          });
+        });
+      } catch (error) {
+        startTransition(() => {
+          setParsedPatch({
+            fileDiffs: [],
+            parseError:
+              error instanceof Error
+                ? error.message
+                : "Failed to parse the PR patch.",
+            isParsing: false,
+          });
+        });
+      }
+    };
+
     worker.addEventListener("message", handleWorkerMessage);
+    worker.addEventListener("error", handleWorkerError);
 
     return () => {
       worker.removeEventListener("message", handleWorkerMessage);
+      worker.removeEventListener("error", handleWorkerError);
       worker.terminate();
       patchParserWorkerRef.current = null;
     };
@@ -280,7 +327,7 @@ function MainApp() {
 
     setParsedPatch({ fileDiffs: [], parseError: "", isParsing: true });
 
-    patchParserWorkerRef.current?.postMessage({
+    const request = {
       type: "parse-patch",
       requestId: parseRequestIdRef.current,
       patch: selectedPatch.patch,
@@ -288,7 +335,32 @@ function MainApp() {
       // Be aggressive here: the review UI only needs enough surrounding lines
       // to orient the reader before Pierre's expand/collapse affordances take over.
       contextSize: AGGRESSIVE_PATCH_CONTEXT_SIZE,
-    } satisfies ParsePatchWorkerRequest);
+    } satisfies ParsePatchWorkerRequest;
+
+    pendingParseRequestRef.current = request;
+
+    if (!patchParserWorkerRef.current) {
+      try {
+        const fileDiffs = parsePatchLocally(
+          request.patch,
+          request.cacheKeyPrefix,
+          request.contextSize,
+        );
+        setParsedPatch({ fileDiffs, parseError: "", isParsing: false });
+      } catch (error) {
+        setParsedPatch({
+          fileDiffs: [],
+          parseError:
+            error instanceof Error
+              ? error.message
+              : "Failed to parse the PR patch.",
+          isParsing: false,
+        });
+      }
+      return;
+    }
+
+    patchParserWorkerRef.current.postMessage(request);
   }, [selectedPatch]);
 
   useEffect(() => {

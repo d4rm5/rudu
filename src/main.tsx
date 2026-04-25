@@ -8,6 +8,7 @@ import "@fontsource/geist-mono/600.css";
 import "@fontsource/geist-mono/700.css";
 import App from "./App";
 import "./index.css";
+import PierreDiffsWorker from "@pierre/diffs/worker/worker-portable.js?worker";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -25,9 +26,7 @@ const initialDiffTheme = document.documentElement.classList.contains("dark")
   : "pierre-light";
 
 function createPierreDiffsWorker() {
-  return new Worker(new URL("./pierre-diffs-worker.ts", import.meta.url), {
-    type: "module",
-  });
+  return new PierreDiffsWorker();
 }
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
@@ -36,6 +35,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
       <WorkerPoolContextProvider
         highlighterOptions={{
           lineDiffType: "word",
+          preferredHighlighter: "shiki-js",
           theme: initialDiffTheme,
         }}
         poolOptions={{

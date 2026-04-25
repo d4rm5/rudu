@@ -127,7 +127,7 @@ function AppUpdater({
         }
       });
 
-      setFeedback("Update installed. Relaunching rudu...");
+      setFeedback("Update installed. Relaunching Rudu...");
       await relaunch();
     } catch (error) {
       setFeedback(`Update install failed: ${getErrorMessage(error)}`);
@@ -176,8 +176,8 @@ function AppUpdater({
             <AlertDialogTitle>Install update</AlertDialogTitle>
             <AlertDialogDescription>
               {currentVersion
-                ? `rudu ${currentVersion} can be updated to ${availableUpdate?.version ?? "a newer version"}.`
-                : `A newer version of rudu is available: ${availableUpdate?.version ?? "unknown"}.`}
+                ? `Rudu ${currentVersion} can be updated to ${availableUpdate?.version ?? "a newer version"}.`
+                : `A newer version of Rudu is available: ${availableUpdate?.version ?? "unknown"}.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
 

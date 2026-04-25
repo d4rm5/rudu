@@ -19,6 +19,7 @@ import {
   githubKeys,
   initialReposQueryOptions,
   replyToPullRequestReviewComment,
+  regeneratePullRequestChapters,
   savedReposQueryOptions,
   searchReposQueryOptions,
   trackedPullRequestListQueryOptions,
@@ -28,6 +29,7 @@ import {
 import type {
   CreatePullRequestReviewCommentInput,
   PrPatch,
+  PullRequestChapters,
   PullRequestSummary,
   ReplyToPullRequestReviewCommentInput,
   RepoSummary,
@@ -303,10 +305,30 @@ function useSelectedPullRequestData(selectedPr: SelectedPullRequest | null) {
     enabled: selectedPr !== null,
   });
 
+  const chaptersQuery = useQuery({
+    queryKey: selectedPr
+      ? githubKeys.pullRequestChapters(selectedPr)
+      : githubKeys.pullRequestChaptersIdle(),
+    queryFn: () => {
+      if (!selectedPr) {
+        throw new Error("No pull request selected");
+      }
+
+      return invoke<PullRequestChapters | null>("get_pull_request_chapters", {
+        repo: selectedPr.repo,
+        number: selectedPr.number,
+        headSha: selectedPr.headSha,
+      });
+    },
+    enabled: selectedPr !== null,
+  });
+
   const selectedPatch = (selectedPatchQuery.data as PrPatch | undefined) ?? null;
   const changedFiles = (changedFilesQuery.data as string[] | undefined) ?? [];
   const reviewThreads =
     (reviewThreadsQuery.data as ReviewThread[] | undefined) ?? [];
+  const chapters =
+    (chaptersQuery.data as PullRequestChapters | null | undefined) ?? null;
 
   const isPatchLoading =
     selectedPr !== null &&
@@ -320,10 +342,17 @@ function useSelectedPullRequestData(selectedPr: SelectedPullRequest | null) {
     selectedPr !== null &&
     (reviewThreadsQuery.isPending ||
       (reviewThreadsQuery.isFetching && !reviewThreadsQuery.data));
+  const isChaptersLoading =
+    selectedPr !== null &&
+    (chaptersQuery.isPending ||
+      (chaptersQuery.isFetching && chaptersQuery.data === undefined));
 
   return {
+    chapters,
+    chaptersError: getErrorMessage(chaptersQuery.error),
     changedFiles,
     changedFilesError: getErrorMessage(changedFilesQuery.error),
+    isChaptersLoading,
     isChangedFilesLoading,
     isPatchLoading,
     isReviewThreadsLoading,
@@ -332,6 +361,29 @@ function useSelectedPullRequestData(selectedPr: SelectedPullRequest | null) {
     reviewThreadsError: getErrorMessage(reviewThreadsQuery.error),
     selectedPatch,
   };
+}
+
+function usePullRequestChaptersMutation(
+  selectedPr: SelectedPullRequest | null,
+) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => {
+      if (!selectedPr) {
+        throw new Error("No pull request selected");
+      }
+
+      return regeneratePullRequestChapters(selectedPr);
+    },
+    onSuccess: (chapters) => {
+      if (!selectedPr) return;
+      queryClient.setQueryData(
+        githubKeys.pullRequestChapters(selectedPr),
+        chapters,
+      );
+    },
+  });
 }
 
 function usePullRequestReviewCommentMutations(
@@ -494,6 +546,7 @@ function usePullRequestReviewCommentMutations(
 
 export {
   getErrorMessage,
+  usePullRequestChaptersMutation,
   usePullRequestReviewCommentMutations,
   useRepoPickerRepos,
   useSavedRepos,

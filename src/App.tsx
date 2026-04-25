@@ -18,6 +18,7 @@ import type { GitStatusEntry } from "@pierre/trees";
 import { RepoSidebar } from "./components/ui/repo-sidebar";
 import { TrackPullRequestModal } from "./components/ui/track-pull-request-modal";
 import { PatchViewerMain } from "./components/ui/patch-viewer-main";
+import { ResizableHandle } from "./components/ui/resizable-handle";
 import { GhCliGateScreen } from "./components/ui/gh-cli-gate-screen";
 import PatchParserWorker from "./pierre-patch-parser-worker.ts?worker";
 import {
@@ -28,6 +29,7 @@ import {
   useTrackedPullRequests,
 } from "./hooks/use-github-queries";
 import { useTheme } from "./hooks/use-theme";
+import { useResizablePanelGroup } from "./hooks/use-resizable-panel-group";
 import { buildReviewThreadsByFile } from "./lib/review-threads";
 import {
   ghCliStatusQueryOptions,
@@ -120,6 +122,14 @@ function MainApp() {
   const pendingParseRequestRef = useRef<ParsePatchWorkerRequest | null>(null);
   const refreshedReposRef = useRef<Set<string>>(new Set());
   const previousRepoNamesRef = useRef<string[]>([]);
+  const appPanelLayout = useResizablePanelGroup({
+    id: "app-sidebar",
+    orientation: "horizontal",
+    controlledPanel: "first",
+    defaultSize: 25,
+    minSize: 18,
+    maxSize: 42,
+  });
 
   const updateSearch = useCallback((value: string) => {
     setSearchQuery(value);
@@ -229,7 +239,10 @@ function MainApp() {
     : null;
   const {
     changedFiles,
+    chapters,
+    chaptersError,
     changedFilesError,
+    isChaptersLoading,
     isChangedFilesLoading,
     isPatchLoading,
     isReviewThreadsLoading,
@@ -541,8 +554,11 @@ function MainApp() {
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-canvas text-ink-900">
-      <div className="flex min-h-0 flex-1">
-        <div className="min-h-0 w-1/4 min-w-[15%] shrink-0">
+      <div ref={appPanelLayout.containerRef} className="flex min-h-0 flex-1">
+        <div
+          className="min-h-0 min-w-[220px] shrink-0"
+          style={appPanelLayout.panelStyle}
+        >
           <RepoSidebar
             repos={repos}
             prsByRepo={prsByRepo}
@@ -562,6 +578,11 @@ function MainApp() {
             }
           />
         </div>
+        <ResizableHandle
+          {...appPanelLayout.handleProps}
+          label="Resize repository sidebar"
+          orientation="horizontal"
+        />
         <div className="min-h-0 min-w-[30%] flex-1">
           <PatchViewerMain
             selectedPrKey={selectedPrKey}
@@ -572,6 +593,9 @@ function MainApp() {
             changedFiles={changedFiles}
             isChangedFilesLoading={isChangedFilesLoading}
             changedFilesError={changedFilesError}
+            chapters={chapters}
+            isChaptersLoading={isChaptersLoading}
+            chaptersError={chaptersError}
             reviewThreadsByFile={reviewThreadsByFile}
             reviewThreads={reviewThreads}
             isReviewThreadsLoading={isReviewThreadsLoading}

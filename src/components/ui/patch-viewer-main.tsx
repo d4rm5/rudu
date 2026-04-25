@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
+import { useQuery } from "@tanstack/react-query";
 import type {
   DiffLineAnnotation,
   FileDiffMetadata,
@@ -10,10 +11,17 @@ import type {
 import type { GitStatusEntry } from "@pierre/trees";
 import { FileDiff, Virtualizer } from "@pierre/diffs/react";
 import { ChangedFilesTree } from "./changed-files-tree";
+import { ChapterOverview } from "./chapter-overview";
+import { LlmSettingsModal } from "./llm-settings-modal";
+import { ResizableHandle } from "./resizable-handle";
 import { ReviewCommentEditor } from "./review-comment-editor";
 import { ReviewThreadCard } from "./review-thread-card";
-import { usePullRequestReviewCommentMutations } from "../../hooks/use-github-queries";
+import {
+  usePullRequestChaptersMutation,
+  usePullRequestReviewCommentMutations,
+} from "../../hooks/use-github-queries";
 import { useDiffNavigator } from "../../hooks/use-diff-navigator";
+import { useResizablePanelGroup } from "../../hooks/use-resizable-panel-group";
 import {
   getFileReviewThreadsForPath,
   isActiveReviewThread,
@@ -23,7 +31,12 @@ import {
   type ReviewThread,
   type ReviewThreadAnnotation,
 } from "../../lib/review-threads";
-import type { FileStatsEntry, ReviewCommentSide } from "../../types/github";
+import { llmSettingsQueryOptions } from "../../queries/llm";
+import type {
+  FileStatsEntry,
+  PullRequestChapters,
+  ReviewCommentSide,
+} from "../../types/github";
 
 const VIRTUALIZER_CONFIG: Partial<VirtualizerConfig> = {
   overscrollSize: 1200,
@@ -86,6 +99,9 @@ type PatchViewerMainProps = {
   reviewThreads: ReviewThread[];
   isReviewThreadsLoading: boolean;
   reviewThreadsError: string;
+  chapters: PullRequestChapters | null;
+  isChaptersLoading: boolean;
+  chaptersError: string;
   parsedPatch: {
     fileDiffs: FileDiffMetadata[];
     parseError: string;
@@ -242,6 +258,9 @@ function PatchViewerMain({
   reviewThreads,
   isReviewThreadsLoading,
   reviewThreadsError,
+  chapters,
+  isChaptersLoading,
+  chaptersError,
   parsedPatch,
   fileStats,
   gitStatus,
@@ -249,6 +268,37 @@ function PatchViewerMain({
   const [draftCommentTarget, setDraftCommentTarget] =
     useState<DraftReviewCommentTarget | null>(null);
   const [draftCommentError, setDraftCommentError] = useState("");
+  const [isLlmSettingsOpen, setIsLlmSettingsOpen] = useState(false);
+  const [selectedChapterId, setSelectedChapterId] = useState<string | null>(
+    null,
+  );
+  const [selectedReviewStepIndex, setSelectedReviewStepIndex] = useState<
+    number | null
+  >(null);
+  const chapterPanelLayout = useResizablePanelGroup({
+    id: "chapter-overview",
+    orientation: "vertical",
+    controlledPanel: "first",
+    defaultSize: 28,
+    minSize: 14,
+    maxSize: 44,
+  });
+  const reviewSidePanelLayout = useResizablePanelGroup({
+    id: "review-side-panel",
+    orientation: "horizontal",
+    controlledPanel: "second",
+    defaultSize: 33,
+    minSize: 22,
+    maxSize: 50,
+  });
+  const fileCommentsPanelLayout = useResizablePanelGroup({
+    id: "file-comments",
+    orientation: "vertical",
+    controlledPanel: "first",
+    defaultSize: 60,
+    minSize: 35,
+    maxSize: 78,
+  });
   const hasSelection = selectedPrKey !== null;
   const shouldShowCommentsPanel =
     hasSelection &&
@@ -274,15 +324,103 @@ function PatchViewerMain({
         }
       : null,
   );
+  const chapterMutation = usePullRequestChaptersMutation(
+    selectedPatch
+      ? {
+          repo: selectedPatch.repo,
+          number: selectedPatch.number,
+          headSha: selectedPatch.headSha,
+        }
+      : null,
+  );
+  const llmSettingsQuery = useQuery({
+    ...llmSettingsQueryOptions(),
+    enabled: hasSelection,
+  });
+  const llmSettings = llmSettingsQuery.data ?? null;
+
+  const selectedChapter = useMemo(
+    () =>
+      chapters?.chapters.find((chapter) => chapter.id === selectedChapterId) ??
+      null,
+    [chapters, selectedChapterId],
+  );
+  const selectedReviewStep = useMemo(() => {
+    if (!selectedChapter || selectedReviewStepIndex === null) {
+      return null;
+    }
+
+    return selectedChapter.reviewSteps[selectedReviewStepIndex] ?? null;
+  }, [selectedChapter, selectedReviewStepIndex]);
+  const selectedChapterFileSet = useMemo(() => {
+    if (!selectedChapter) return null;
+    const reviewStepFiles = selectedReviewStep?.files ?? [];
+    const visibleFiles =
+      reviewStepFiles.length > 0
+        ? reviewStepFiles
+        : selectedChapter.files.map((file) => file.path);
+
+    return new Set(visibleFiles.map((file) => normalizePath(file)));
+  }, [selectedChapter, selectedReviewStep]);
+  const visibleChangedFiles = useMemo(() => {
+    if (!selectedChapterFileSet) return changedFiles;
+    return changedFiles.filter((path) =>
+      selectedChapterFileSet.has(normalizePath(path)),
+    );
+  }, [changedFiles, selectedChapterFileSet]);
+  const visibleFileDiffs = useMemo(() => {
+    if (!selectedChapterFileSet) return parsedPatch.fileDiffs;
+    return parsedPatch.fileDiffs.filter((fileDiff) =>
+      selectedChapterFileSet.has(normalizePath(fileDiff.name)),
+    );
+  }, [parsedPatch.fileDiffs, selectedChapterFileSet]);
 
   useEffect(() => {
     setDraftCommentTarget(null);
     setDraftCommentError("");
+    setSelectedChapterId(null);
+    setSelectedReviewStepIndex(null);
   }, [selectedPrKey]);
 
   useEffect(() => {
+    if (!selectedChapterId) return;
+    if (chapters?.chapters.some((chapter) => chapter.id === selectedChapterId)) {
+      return;
+    }
+
+    setSelectedChapterId(null);
+    setSelectedReviewStepIndex(null);
+  }, [chapters, selectedChapterId]);
+
+  useEffect(() => {
+    if (selectedReviewStepIndex === null) return;
+    if (
+      selectedChapter &&
+      selectedReviewStepIndex < selectedChapter.reviewSteps.length
+    ) {
+      return;
+    }
+
+    setSelectedReviewStepIndex(null);
+  }, [selectedChapter, selectedReviewStepIndex]);
+
+  useEffect(() => {
     navigator.actions.notifyDiffContentChanged();
-  }, [navigator.actions, parsedPatch.fileDiffs, reviewThreadsByFile]);
+  }, [
+    navigator.actions,
+    parsedPatch.fileDiffs,
+    reviewThreadsByFile,
+    selectedChapterFileSet,
+  ]);
+
+  function handleSelectChapter(chapterId: string | null) {
+    setSelectedChapterId(chapterId);
+    setSelectedReviewStepIndex(null);
+  }
+
+  function handleSelectReviewStep(stepIndex: number | null) {
+    setSelectedReviewStepIndex(stepIndex);
+  }
 
   function openLineCommentDraft(path: string, range: SelectedLineRange) {
     const startSide = range.side ?? range.endSide;
@@ -460,15 +598,60 @@ function PatchViewerMain({
   }
 
   return (
-    <main className="h-full min-h-0 min-w-0 pl-0">
-      <section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-surface">
-        <div className="flex min-h-0 min-w-0 flex-1">
-          <div className="min-h-0 min-w-[30%] flex-1">
-            <Virtualizer
-              className="relative h-full min-h-0 min-w-0 overflow-y-auto scrollbar-hidden"
-              config={VIRTUALIZER_CONFIG}
-              contentClassName="flex min-h-full flex-col bg-white dark:bg-surface"
-            >
+    <>
+      <main className="h-full min-h-0 min-w-0 pl-0">
+        <div
+          ref={chapterPanelLayout.containerRef}
+          className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-surface"
+        >
+          <div
+            className="min-h-[128px] shrink-0 overflow-hidden"
+            style={chapterPanelLayout.panelStyle}
+          >
+            <ChapterOverview
+              chapters={chapters}
+              error={chaptersError}
+              generationError={
+                chapterMutation.error instanceof Error
+                  ? chapterMutation.error.message
+                  : chapterMutation.error
+                    ? String(chapterMutation.error)
+                    : ""
+              }
+              isGenerating={chapterMutation.isPending}
+              isLoading={isChaptersLoading}
+              onGenerate={() => void chapterMutation.mutate()}
+              onOpenSettings={() => setIsLlmSettingsOpen(true)}
+              onSelectChapter={handleSelectChapter}
+              onSelectReviewStep={handleSelectReviewStep}
+              reviewThreadsByFile={reviewThreadsByFile}
+              selectedChapterId={selectedChapterId}
+              selectedReviewStepIndex={selectedReviewStepIndex}
+              settings={llmSettings}
+              settingsError={
+                llmSettingsQuery.error instanceof Error
+                  ? llmSettingsQuery.error.message
+                  : llmSettingsQuery.error
+                    ? String(llmSettingsQuery.error)
+                    : ""
+              }
+            />
+          </div>
+          <ResizableHandle
+            {...chapterPanelLayout.handleProps}
+            label="Resize AI summary panel"
+            orientation="vertical"
+          />
+          <div
+            ref={reviewSidePanelLayout.containerRef}
+            className="flex min-h-0 min-w-0 flex-1"
+          >
+            <div className="min-h-0 min-w-[30%] flex-1">
+              <Virtualizer
+                className="relative h-full min-h-0 min-w-0 overflow-y-auto scrollbar-hidden"
+                config={VIRTUALIZER_CONFIG}
+                contentClassName="flex min-h-full flex-col bg-white dark:bg-surface"
+              >
               {!selectedPrKey && !isPatchLoading ? (
                 <div className="flex min-h-[50vh] flex-col items-center justify-center gap-2 px-6 py-10 text-center md:min-h-full">
                   <strong>Select a pull request.</strong>
@@ -512,9 +695,13 @@ function PatchViewerMain({
                     <pre className="m-0 overflow-auto scrollbar-hidden whitespace-pre-wrap break-words p-5">
                       {selectedPatch.patch}
                     </pre>
+                  ) : visibleFileDiffs.length === 0 ? (
+                    <div className="flex min-h-[50vh] items-center justify-center px-6 py-10 text-center text-sm text-ink-500 md:min-h-full">
+                      No parsed diffs matched this AI summary.
+                    </div>
                   ) : (
                     <div className="flex flex-col bg-white dark:bg-surface">
-                      {parsedPatch.fileDiffs.map((fileDiff) => {
+                      {visibleFileDiffs.map((fileDiff) => {
                         const fileReviewThreads = getFileReviewThreadsForPath(
                           reviewThreadsByFile,
                           fileDiff.name,
@@ -670,50 +857,78 @@ function PatchViewerMain({
                   )}
                 </div>
               ) : null}
-            </Virtualizer>
-          </div>
-          <div className="min-h-0 w-1/3 min-w-[15%] shrink-0">
+              </Virtualizer>
+            </div>
+            <ResizableHandle
+              {...reviewSidePanelLayout.handleProps}
+              label="Resize file tree and comments"
+              orientation="horizontal"
+            />
             <div
-              className={cx(
-                "flex h-full min-h-0 min-w-0 flex-col",
-                shouldShowCommentsPanel && "divide-y divide-ink-200",
-              )}
+              className="min-h-0 min-w-[260px] shrink-0"
+              style={reviewSidePanelLayout.panelStyle}
             >
               <div
+                ref={fileCommentsPanelLayout.containerRef}
                 className={cx(
-                  "min-h-0 overflow-hidden",
-                  shouldShowCommentsPanel ? "flex-[3]" : "flex-1",
+                  "flex h-full min-h-0 min-w-0 flex-col",
+                  shouldShowCommentsPanel && "bg-surface",
                 )}
               >
-                <ChangedFilesTree
-                  error={changedFilesError}
-                  files={changedFiles}
-                  hasSelection={hasSelection}
-                  isDark={isDark}
-                  isLoading={isChangedFilesLoading}
-                  onSelectFile={navigator.tree.onSelectFile}
-                  selectedFilePath={navigator.tree.selectedFilePath}
-                  showContainer={false}
-                  fileStats={fileStats}
-                  gitStatus={gitStatus}
-                />
-              </div>
-
-              {shouldShowCommentsPanel ? (
-                <div className="min-h-0 flex-[2] overflow-y-auto scrollbar-hidden bg-surface">
-                  <ReviewThreadsPanel
-                    threads={reviewThreads}
-                    isLoading={isReviewThreadsLoading}
-                    error={reviewThreadsError}
+                <div
+                  style={
+                    shouldShowCommentsPanel
+                      ? fileCommentsPanelLayout.panelStyle
+                      : undefined
+                  }
+                  className={cx(
+                    "min-h-0 overflow-hidden",
+                    shouldShowCommentsPanel
+                      ? "min-h-[180px] shrink-0"
+                      : "flex-1",
+                  )}
+                >
+                  <ChangedFilesTree
+                    error={changedFilesError}
+                    files={visibleChangedFiles}
                     hasSelection={hasSelection}
+                    isDark={isDark}
+                    isLoading={isChangedFilesLoading}
+                    onSelectFile={navigator.tree.onSelectFile}
+                    selectedFilePath={navigator.tree.selectedFilePath}
+                    showContainer={false}
+                    fileStats={fileStats}
+                    gitStatus={gitStatus}
                   />
                 </div>
-              ) : null}
+
+                {shouldShowCommentsPanel ? (
+                  <>
+                    <ResizableHandle
+                      {...fileCommentsPanelLayout.handleProps}
+                      label="Resize files and comments"
+                      orientation="vertical"
+                    />
+                    <div className="min-h-[140px] flex-1 overflow-y-auto scrollbar-hidden bg-surface">
+                      <ReviewThreadsPanel
+                        threads={reviewThreads}
+                        isLoading={isReviewThreadsLoading}
+                        error={reviewThreadsError}
+                        hasSelection={hasSelection}
+                      />
+                    </div>
+                  </>
+                ) : null}
+              </div>
             </div>
           </div>
         </div>
-      </section>
-    </main>
+      </main>
+      <LlmSettingsModal
+        onOpenChange={setIsLlmSettingsOpen}
+        open={isLlmSettingsOpen}
+      />
+    </>
   );
 }
 
